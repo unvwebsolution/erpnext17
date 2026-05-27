@@ -1,5 +1,4 @@
-FROM frappe/erpnext:v17
-
+FROM frappe/erpnext:v17.10.0
 USER root
 
 RUN apt-get update && \
