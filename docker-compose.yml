@@ -1,0 +1,216 @@
+version: "3.9"
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command:
+      - bash
+      - -c
+      - |
+          [ -d apps/hrms ] && ./env/bin/pip install -e apps/hrms;
+          [ -d apps/crm ] && ./env/bin/pip install -e apps/crm;
+
+          exec /home/frappe/frappe-bench/env/bin/gunicorn \
+          --chdir=/home/frappe/frappe-bench/sites \
+          --bind=0.0.0.0:8000 \
+          --threads=4 \
+          --workers=2 \
+          --worker-class=gthread \
+          --worker-tmp-dir=/dev/shm \
+          --timeout=120 \
+          frappe.app:application
+
+    depends_on:
+      - mariadb
+      - redis-cache
+      - redis-queue
+      - redis-socketio
+
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      MYSQL_ROOT_PASSWORD: admin
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+      SOCKETIO_PORT: "9000"
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command: nginx-entrypoint.sh
+
+    depends_on:
+      - backend
+      - websocket
+
+    expose:
+      - "8080"
+
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: next.t3packages.com
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command:
+      - bash
+      - -c
+      - |
+          [ -d apps/hrms ] && ./env/bin/pip install -e apps/hrms;
+          [ -d apps/crm ] && ./env/bin/pip install -e apps/crm;
+
+          exec node /home/frappe/frappe-bench/apps/frappe/socketio.js
+
+    depends_on:
+      - redis-cache
+      - redis-queue
+      - redis-socketio
+
+    environment:
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+      SOCKETIO_PORT: "9000"
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  queue-short:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command:
+      - bash
+      - -c
+      - |
+          [ -d apps/hrms ] && ./env/bin/pip install -e apps/hrms;
+          [ -d apps/crm ] && ./env/bin/pip install -e apps/crm;
+
+          exec bench worker --queue short,default
+
+    depends_on:
+      - mariadb
+      - redis-cache
+      - redis-queue
+
+    environment:
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  queue-long:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command:
+      - bash
+      - -c
+      - |
+          [ -d apps/hrms ] && ./env/bin/pip install -e apps/hrms;
+          [ -d apps/crm ] && ./env/bin/pip install -e apps/crm;
+
+          exec bench worker --queue long,default,short
+
+    depends_on:
+      - mariadb
+      - redis-cache
+      - redis-queue
+
+    environment:
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command:
+      - bash
+      - -c
+      - |
+          [ -d apps/hrms ] && ./env/bin/pip install -e apps/hrms;
+          [ -d apps/crm ] && ./env/bin/pip install -e apps/crm;
+
+          exec bench schedule
+
+    depends_on:
+      - mariadb
+      - redis-cache
+      - redis-queue
+
+    environment:
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - apps:/home/frappe/frappe-bench/apps
+
+  redis-cache:
+    image: redis:7-alpine
+
+  redis-queue:
+    image: redis:7-alpine
+
+  redis-socketio:
+    image: redis:7-alpine
+
+  mariadb:
+    image: mariadb:11.4
+
+    command:
+      - --transaction-isolation=READ-COMMITTED
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+volumes:
+  mariadb_data:
+  sites:
+  logs:
+  apps:
